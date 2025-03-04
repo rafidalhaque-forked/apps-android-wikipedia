@@ -12,7 +12,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.app.ActivityOptionsCompat
 import androidx.core.os.bundleOf
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -25,9 +28,12 @@ import org.wikipedia.activity.FragmentUtil.getCallback
 import org.wikipedia.analytics.eventplatform.ArticleLinkPreviewInteractionEvent
 import org.wikipedia.analytics.eventplatform.PlacesEvent
 import org.wikipedia.analytics.metricsplatform.ArticleLinkPreviewInteraction
+import org.wikipedia.auth.AccountUtil
 import org.wikipedia.bridge.JavaScriptActionHandler
 import org.wikipedia.databinding.DialogLinkPreviewBinding
 import org.wikipedia.dataclient.page.PageSummary
+import org.wikipedia.edit.EditHandler
+import org.wikipedia.edit.EditSectionActivity
 import org.wikipedia.gallery.GalleryActivity
 import org.wikipedia.gallery.GalleryThumbnailScrollView.GalleryViewListener
 import org.wikipedia.history.HistoryEntry
@@ -72,8 +78,7 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
     private var linkPreviewInteraction: ArticleLinkPreviewInteraction? = null
     private var overlayView: LinkPreviewOverlayView? = null
     private var navigateSuccess = false
-    private var revision: Long = 0
-    private val viewModel: LinkPreviewViewModel by viewModels { LinkPreviewViewModel.Factory(requireArguments()) }
+    private val viewModel: LinkPreviewViewModel by viewModels()
 
     private val menuListener = PopupMenu.OnMenuItemClickListener { item ->
         return@OnMenuItemClickListener when (item.itemId) {
@@ -130,13 +135,13 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
     private val galleryViewListener = GalleryViewListener { view, thumbUrl, imageName ->
         var options: ActivityOptionsCompat? = null
         view.drawable?.let {
-            val hitInfo = JavaScriptActionHandler.ImageHitInfo(0f, 0f, it.intrinsicWidth.toFloat(), it.intrinsicHeight.toFloat(), thumbUrl, false)
+            val hitInfo = JavaScriptActionHandler.ImageHitInfo(0f, 0f, it.intrinsicWidth.toFloat(), it.intrinsicHeight.toFloat(), thumbUrl)
             GalleryActivity.setTransitionInfo(hitInfo)
             view.transitionName = requireActivity().getString(R.string.transition_page_gallery)
             options = ActivityOptionsCompat.makeSceneTransitionAnimation(requireActivity(), view, requireActivity().getString(R.string.transition_page_gallery))
         }
         requestGalleryLauncher.launch(GalleryActivity.newIntent(requireContext(), viewModel.pageTitle,
-            imageName, viewModel.pageTitle.wikiSite, revision, GalleryActivity.SOURCE_LINK_PREVIEW), options)
+            imageName, viewModel.pageTitle.wikiSite), options)
     }
 
     private val requestGalleryLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -145,11 +150,25 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
         }
     }
 
+    private val requestStubArticleEditLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (it.resultCode == EditHandler.RESULT_REFRESH_PAGE) {
+            overlayView?.let { overlay ->
+                FeedbackUtil.makeSnackbar(overlay.rootView, getString(R.string.stub_article_edit_saved_successfully))
+                    .setAnchorView(overlay.secondaryButtonView).show()
+            }
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = DialogLinkPreviewBinding.inflate(inflater, container, false)
         binding.linkPreviewToolbar.setOnClickListener { goToLinkedPage(false) }
         binding.linkPreviewOverflowButton.setOnClickListener {
             setupOverflowMenu()
+        }
+        binding.linkPreviewEditButton.setOnClickListener {
+            viewModel.pageTitle.run {
+                requestStubArticleEditLauncher.launch(EditSectionActivity.newIntent(requireContext(), -1, null, this, Constants.InvokeSource.LINK_PREVIEW_MENU, null))
+            }
         }
         L10nUtil.setConditionalLayoutDirection(binding.root, viewModel.pageTitle.wikiSite.languageCode)
 
@@ -188,7 +207,7 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
         popupMenu.inflate(R.menu.menu_link_preview)
         popupMenu.menu.findItem(R.id.menu_link_preview_add_to_list).isVisible = !viewModel.fromPlaces
         popupMenu.menu.findItem(R.id.menu_link_preview_share_page).isVisible = !viewModel.fromPlaces
-        popupMenu.menu.findItem(R.id.menu_link_preview_watch).isVisible = viewModel.fromPlaces
+        popupMenu.menu.findItem(R.id.menu_link_preview_watch).isVisible = viewModel.fromPlaces && AccountUtil.isLoggedIn
         popupMenu.menu.findItem(R.id.menu_link_preview_watch).title = getString(if (viewModel.isWatched) R.string.menu_page_unwatch else R.string.menu_page_watch)
         popupMenu.menu.findItem(R.id.menu_link_preview_open_in_new_tab).isVisible = viewModel.fromPlaces
         popupMenu.menu.findItem(R.id.menu_link_preview_view_on_map).isVisible = !viewModel.fromPlaces && viewModel.location != null
@@ -218,8 +237,6 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
         )
         linkPreviewInteraction?.logLinkClick()
 
-        revision = summary.revision
-
         binding.linkPreviewTitle.text = StringUtil.fromHtml(summary.displayTitle)
         if (viewModel.fromPlaces) {
             viewModel.location?.let { startLocation ->
@@ -240,7 +257,8 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
 
     override fun onResume() {
         super.onResume()
-        val containerView = requireDialog().findViewById<ViewGroup>(R.id.container)
+
+        val containerView = requireDialog().findViewById<ViewGroup>(android.R.id.content)
         if (overlayView == null && containerView != null) {
             LinkPreviewOverlayView(requireContext()).let {
                 overlayView = it
@@ -268,6 +286,12 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
                     it.showTertiaryButton(false)
                 }
                 containerView.addView(it)
+
+                ViewCompat.setOnApplyWindowInsetsListener(it) { view, insets ->
+                    val systemWindowInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                    view.updateLayoutParams<ViewGroup.MarginLayoutParams> { bottomMargin = systemWindowInsets.bottom }
+                    insets
+                }
             }
         }
     }
@@ -347,7 +371,7 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
     }
 
     private fun showPreview(contents: LinkPreviewContents) {
-        viewModel.loadGallery(revision)
+        viewModel.loadGallery()
         setPreviewContents(contents)
     }
 
@@ -374,23 +398,25 @@ class LinkPreviewDialog : ExtendedBottomSheetDialogFragment(), LinkPreviewErrorV
     }
 
     private fun setPreviewContents(contents: LinkPreviewContents) {
-        if (!contents.extract.isNullOrEmpty()) {
-            binding.linkPreviewExtractWebview.setBackgroundColor(Color.TRANSPARENT)
-            val colorHex = ResourceUtil.colorToCssString(
-                    ResourceUtil.getThemedColor(
-                            requireContext(),
-                            android.R.attr.textColorPrimary
-                    )
+        binding.linkPreviewExtractWebview.setBackgroundColor(Color.TRANSPARENT)
+        val colorHex = ResourceUtil.colorToCssString(
+            ResourceUtil.getThemedColor(
+                requireContext(),
+                android.R.attr.textColorPrimary
             )
-            val dir = if (L10nUtil.isLangRTL(viewModel.pageTitle.wikiSite.languageCode)) "rtl" else "ltr"
-            binding.linkPreviewExtractWebview.loadDataWithBaseURL(
-                    null,
-                    "${JavaScriptActionHandler.getCssStyles(viewModel.pageTitle.wikiSite)}<div style=\"line-height: 150%; color: #$colorHex\" dir=\"$dir\">${contents.extract}</div>",
-                    "text/html",
-                    "UTF-8",
-                    null
-            )
-        }
+        )
+        val dir = if (L10nUtil.isLangRTL(viewModel.pageTitle.wikiSite.languageCode)) "rtl" else "ltr"
+        val editVisibility = contents.extract.isNullOrBlank() && contents.ns?.id == Namespace.MAIN.code()
+        binding.linkPreviewEditButton.isVisible = editVisibility
+        binding.linkPreviewThumbnailGallery.isVisible = !editVisibility
+        val extract = if (editVisibility) "<i>" + getString(R.string.link_preview_stub_placeholder_text) + "</i>" else contents.extract
+        binding.linkPreviewExtractWebview.loadDataWithBaseURL(
+            null,
+            "${JavaScriptActionHandler.getCssStyles(viewModel.pageTitle.wikiSite)}<div style=\"line-height: 150%; color: #$colorHex\" dir=\"$dir\">$extract</div>",
+            "text/html",
+            "UTF-8",
+            null
+        )
         contents.title.thumbUrl?.let {
             binding.linkPreviewThumbnail.visibility = View.VISIBLE
             ViewUtil.loadImage(binding.linkPreviewThumbnail, it)

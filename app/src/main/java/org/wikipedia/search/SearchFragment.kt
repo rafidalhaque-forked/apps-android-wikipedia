@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.core.os.bundleOf
+import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -89,6 +90,7 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
                 }
             }
             Prefs.selectedLanguagePositionInSearch = position
+            setUpLanguageScroll(Prefs.selectedLanguagePositionInSearch)
         }
     }
 
@@ -118,6 +120,7 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
         binding.searchLangButton.setOnClickListener { onLangButtonClick() }
         initSearchView()
         if (invokeSource == InvokeSource.PLACES) {
+            Prefs.selectedLanguagePositionInSearch = app.languageState.appLanguageCodes.indexOf(Prefs.placesWikiCode)
             PlacesEvent.logImpression("search_view")
         }
         return binding.root
@@ -128,6 +131,7 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
         setUpLanguageScroll(Prefs.selectedLanguagePositionInSearch)
         startSearch(query, langBtnClicked)
         binding.searchCabView.setCloseButtonVisibility(query)
+        recentSearchesFragment.binding.namespacesContainer.isVisible = invokeSource != InvokeSource.PLACES
         if (!query.isNullOrEmpty()) {
             showPanel(PANEL_SEARCH_RESULTS)
         }
@@ -157,23 +161,10 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
             binding.searchLanguageScrollView.setUpLanguageScrollTabData(app.languageState.appLanguageCodes, pos, this)
             binding.searchLangButton.visibility = View.GONE
         } else {
-            maybeShowMultilingualSearchTooltip()
             binding.searchLanguageScrollViewContainer.visibility = View.GONE
             binding.searchLangButton.visibility = View.VISIBLE
             initLangButton()
-            recentSearchesFragment.onLangCodeChanged()
-        }
-    }
-
-    private fun maybeShowMultilingualSearchTooltip() {
-        if (Prefs.isMultilingualSearchTooltipShown) {
-            binding.searchLangButton.postDelayed({
-                if (isAdded) {
-                    FeedbackUtil.showTooltip(requireActivity(), binding.searchLangButton, getString(R.string.tool_tip_lang_button),
-                            aboveOrBelow = false, autoDismiss = false)
-                }
-            }, 500)
-            Prefs.isMultilingualSearchTooltipShown = false
+            recentSearchesFragment.reloadRecentSearches()
         }
     }
 
@@ -274,7 +265,6 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
         // automatically trigger the showing of the corresponding search results.
         if (!query.isNullOrBlank()) {
             binding.searchCabView.setQuery(query, false)
-            binding.searchCabView.selectAllQueryTexts()
         }
     }
 
@@ -311,7 +301,9 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
         binding.searchCabView.setOnCloseListener(searchCloseListener)
         binding.searchCabView.setSearchHintTextColor(ResourceUtil.getThemedColor(requireContext(),
                 R.attr.secondary_color))
-        binding.searchCabView.queryHint = getString(if (invokeSource == InvokeSource.PLACES) R.string.places_search_hint else R.string.search_hint)
+
+        binding.searchCabView.queryHint =
+            getString(if (invokeSource == InvokeSource.PLACES) R.string.places_search_hint else R.string.search_hint)
 
         // remove focus line from search plate
         val searchEditPlate = binding.searchCabView
@@ -345,7 +337,7 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
         }
         searchLanguageCode = selectedLanguageCode
         searchResultsFragment.setLayoutDirection(searchLanguageCode)
-        recentSearchesFragment.onLangCodeChanged()
+        recentSearchesFragment.reloadRecentSearches()
         startSearch(query, false)
     }
 
@@ -358,10 +350,7 @@ class SearchFragment : Fragment(), SearchResultsFragment.Callback, RecentSearche
         private const val PANEL_RECENT_SEARCHES = 0
         private const val PANEL_SEARCH_RESULTS = 1
         private const val INTENT_DELAY_MILLIS = 500L
-        const val RESULT_LANG_CHANGED = 1
-        const val LANG_BUTTON_TEXT_SIZE_LARGER = 12
-        const val LANG_BUTTON_TEXT_SIZE_MEDIUM = 10
-        const val LANG_BUTTON_TEXT_SIZE_SMALLER = 8
+        const val RESULT_LANG_CHANGED = 98
 
         fun newInstance(source: InvokeSource, query: String?, returnLink: Boolean = false): SearchFragment =
                 SearchFragment().apply {

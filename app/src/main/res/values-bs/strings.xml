@@ -54,7 +54,7 @@
   <string name="page_edit_history_filter_by">Filtriraj po</string>
   <string name="page_edit_history_filter_by_all">Sve izmjene (%s)</string>
   <string name="page_edit_history_filter_by_user">Korisničke izmjene (%s)</string>
-  <string name="page_edit_history_filter_by_anon">Anonimne izmjene (%s)</string>
+  <string name="page_edit_history_filter_by_anon" fuzzy="true">Anonimne izmjene (%s)</string>
   <string name="page_edit_history_filter_by_bot">Izmjene botova (%s)</string>
   <string name="page_edit_history_metrics_content_description">Metrika od %1$s do %2$s</string>
   <plurals name="page_edit_history_article_edits_since_year">
@@ -226,8 +226,8 @@
   <string name="android_app_faq_url">https://www.mediawiki.org/wiki/Wikimedia_Apps/Android_FAQ/bs</string>
   <string name="terms_of_use_url">https://foundation.wikimedia.org/wiki/Terms_of_Use</string>
   <string name="android_app_request_an_account_url">https://en.wikipedia.org/wiki/Wikipedia:Request_an_account</string>
-  <string name="android_app_edit_help_url">https://m.mediawiki.org/wiki/Wikimedia_Apps/Suggested_edits</string>
-  <string name="suggested_edits_image_tags_help_url">https://www.mediawiki.org/wiki/Wikimedia_Apps/Suggested_edits#Image_tags</string>
+  <string name="android_app_edit_help_url" fuzzy="true">https://m.mediawiki.org/wiki/Wikimedia_Apps/Suggested_edits</string>
+  <string name="suggested_edits_image_tags_help_url" fuzzy="true">https://www.mediawiki.org/wiki/Wikimedia_Apps/Suggested_edits#Image_tags</string>
   <string name="about_libraries_heading">Korištene biblioteke</string>
   <string name="about_contributors_heading">Saradnici</string>
   <string name="about_contributors">&lt;a href=\"https://www.mediawiki.org/wiki/Wikimedia_Apps/Team/Android\"&gt;Stranice ekipe&lt;/a&gt;</string>
