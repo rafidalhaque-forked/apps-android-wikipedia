@@ -20,6 +20,7 @@ import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 import org.wikipedia.Constants
 import org.wikipedia.Constants.InvokeSource.TALK_TOPICS_ACTIVITY
@@ -122,6 +123,13 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
                         binding.talkConditionContainer.isVisible = true
                         viewModel.undoSave(newRevisionId, undoneSubject, undoneText)
                     }
+                    .addCallback(object : Snackbar.Callback() {
+                        override fun onDismissed(transientBottomBar: Snackbar, @DismissEvent event: Int) {
+                            if (!isDestroyed) {
+                                AccountUtil.maybeShowTempAccountWelcome(this@TalkTopicsActivity)
+                            }
+                        }
+                    })
                     .show()
                 viewModel.loadTopics()
             }
@@ -178,7 +186,6 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
             resetViews()
             viewModel.loadTopics()
         }
-        binding.talkRefreshView.setColorSchemeResources(ResourceUtil.getThemedAttributeId(this, R.attr.progressive_color))
 
         invokeSource = intent.getSerializableExtra(Constants.INTENT_EXTRA_INVOKE_SOURCE) as Constants.InvokeSource
 
@@ -320,8 +327,6 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
     }
 
     private fun updateOnSuccess(pageTitle: PageTitle, threadItems: List<ThreadItem>) {
-        setToolbarTitle(pageTitle)
-
         if (binding.talkRecyclerView.adapter == null) {
             binding.talkRecyclerView.adapter = concatAdapter.apply {
                 addAdapter(0, headerAdapter)
@@ -349,7 +354,7 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
                 }
             }
             if (threadTopic != null) {
-                requestGoToTopic.launch(TalkTopicActivity.newIntent(this@TalkTopicsActivity, pageTitle, threadTopic!!.name, threadTopic!!.id, threadItem?.id, viewModel.currentSearchQuery, invokeSource))
+                requestGoToTopic.launch(TalkTopicActivity.newIntent(this@TalkTopicsActivity, pageTitle, threadTopic.name, threadTopic.id, threadItem?.id, viewModel.currentSearchQuery, invokeSource))
                 overridePendingTransition(0, 0)
                 return
             }
@@ -371,6 +376,7 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
         }
         binding.talkProgressBar.isVisible = false
         invalidateOptionsMenu()
+        setToolbarTitle(pageTitle)
     }
 
     private fun updateOnError(t: Throwable) {
@@ -408,7 +414,7 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
     }
 
     private fun setToolbarTitle(pageTitle: PageTitle) {
-        val title = StringUtil.fromHtml(pageTitle.namespace.ifEmpty { TalkAliasData.valueFor(pageTitle.wikiSite.languageCode) } + ": " + "<a href='#'>${StringUtil.removeNamespace(pageTitle.displayText)}</a>")
+        val title = StringUtil.fromHtml(pageTitle.namespace.ifEmpty { TalkAliasData.valueFor(pageTitle.wikiSite.languageCode) } + ": " + "<a href='#'>${StringUtil.removeNamespace(StringUtil.removeHTMLTags(pageTitle.displayText))}</a>")
         ViewUtil.getTitleViewFromToolbar(binding.toolbar)?.let {
             it.contentDescription = title
             it.isVisible = !goToTopic
@@ -528,17 +534,9 @@ class TalkTopicsActivity : BaseActivity(), WatchlistExpiryDialog.Callback {
     private inner class SearchCallback : SearchActionModeCallback() {
         var searchActionProvider: SearchActionProvider? = null
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-            searchActionProvider = SearchActionProvider(this@TalkTopicsActivity, searchHintString,
-                object : SearchActionProvider.Callback {
-                    override fun onQueryTextChange(s: String) {
-                        onQueryChange(s)
-                    }
+            searchActionProvider = SearchActionProvider(this@TalkTopicsActivity, getSearchHintString()) { onQueryChange(it) }
 
-                    override fun onQueryTextFocusChange() {
-                    }
-                })
-
-            val menuItem = menu.add(searchHintString)
+            val menuItem = menu.add(getSearchHintString())
 
             MenuItemCompat.setActionProvider(menuItem, searchActionProvider)
 

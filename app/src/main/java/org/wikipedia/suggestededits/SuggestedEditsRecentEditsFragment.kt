@@ -23,8 +23,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.paging.LoadState
 import androidx.paging.LoadStateAdapter
-import androidx.paging.PagingData
-import androidx.paging.PagingDataAdapter
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -35,6 +33,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import org.wikipedia.Constants
 import org.wikipedia.R
+import org.wikipedia.adapter.PagingDataAdapterPatched
 import org.wikipedia.analytics.eventplatform.PatrollerExperienceEvent
 import org.wikipedia.auth.AccountUtil
 import org.wikipedia.databinding.FragmentSuggestedEditsRecentEditsBinding
@@ -50,6 +49,7 @@ import org.wikipedia.page.PageTitle
 import org.wikipedia.settings.Prefs
 import org.wikipedia.staticdata.UserAliasData
 import org.wikipedia.talk.UserTalkPopupHelper
+import org.wikipedia.talk.template.TalkTemplatesActivity
 import org.wikipedia.util.FeedbackUtil
 import org.wikipedia.util.ResourceUtil
 import org.wikipedia.util.StringUtil
@@ -76,7 +76,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
             viewModel.langCode = Prefs.recentEditsWikiCode
             setupAdapters()
             viewModel.clearCache()
-            recentEditsListAdapter.reload()
+            recentEditsListAdapter.refresh()
             recentEditsSearchBarAdapter.notifyItemChanged(0)
         }
     }
@@ -86,7 +86,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
         _binding = FragmentSuggestedEditsRecentEditsBinding.inflate(inflater, container, false)
 
         (requireActivity() as AppCompatActivity).setSupportActionBar(binding.toolbar)
-        (requireActivity() as AppCompatActivity).supportActionBar!!.title = getString(R.string.patroller_tasks_edits_list_title)
+        (requireActivity() as AppCompatActivity).supportActionBar!!.title = getString(R.string.suggested_edits_edit_patrol)
 
         return binding.root
     }
@@ -100,12 +100,12 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
 
         binding.refreshContainer.setOnRefreshListener {
             viewModel.clearCache()
-            recentEditsListAdapter.reload()
+            recentEditsListAdapter.refresh()
         }
 
         binding.refreshContainer.setOnRefreshListener {
             viewModel.clearCache()
-            recentEditsListAdapter.reload()
+            recentEditsListAdapter.refresh()
         }
 
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())
@@ -137,7 +137,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
                 }
                 launch {
                     viewModel.recentEditsFlow.collectLatest {
-                        recentEditsListAdapter.submitData(it)
+                        recentEditsListAdapter.submitData(lifecycleScope, it)
                     }
                 }
             }
@@ -156,7 +156,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
     override fun onResume() {
         super.onResume()
         actionMode?.let {
-            if (SearchActionModeCallback.`is`(it)) {
+            if (SearchActionModeCallback.matches(it)) {
                 searchActionModeCallback.refreshProvider()
             }
         }
@@ -173,11 +173,17 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
                 FeedbackUtil.showAndroidAppEditingFAQ(requireContext())
                 true
             }
+            R.id.menu_saved_messages -> {
+                sendPatrollerExperienceEvent("list_saved_init", "pt_warning_messages")
+                val pageTitle = PageTitle(UserAliasData.valueFor(viewModel.wikiSite.languageCode), AccountUtil.userName, viewModel.wikiSite)
+                requireActivity().startActivity(TalkTemplatesActivity.newIntent(requireContext(), pageTitle, true))
+                true
+            }
             R.id.menu_report_feature -> {
                 sendPatrollerExperienceEvent("top_menu_feedback_click", "pt_recent_changes")
-                FeedbackUtil.composeFeedbackEmail(requireContext(),
-                    getString(R.string.email_report_patroller_tasks_subject),
-                    getString(R.string.email_report_patroller_tasks_body))
+                FeedbackUtil.composeEmail(requireContext(),
+                    subject = getString(R.string.email_report_patroller_tasks_subject),
+                    body = getString(R.string.email_report_patroller_tasks_body))
                 true
             }
             else -> false
@@ -285,13 +291,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
     }
 
     private inner class RecentEditsListAdapter :
-        PagingDataAdapter<SuggestedEditsRecentEditsViewModel.RecentEditsItemModel, RecyclerView.ViewHolder>(RecentEditsDiffCallback()) {
-
-        fun reload() {
-            submitData(lifecycle, PagingData.empty())
-            viewModel.recentEditsSource?.invalidate()
-        }
-
+        PagingDataAdapterPatched<SuggestedEditsRecentEditsViewModel.RecentEditsItemModel, RecyclerView.ViewHolder>(RecentEditsDiffCallback()) {
         override fun getItemViewType(position: Int): Int {
             return if (getItem(position) is SuggestedEditsRecentEditsViewModel.RecentEditsSeparator) {
                 VIEW_TYPE_SEPARATOR
@@ -402,8 +402,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
         override fun onItemClick(item: MwQueryResult.RecentChange) {
             sendPatrollerExperienceEvent("edit_item_click", "pt_recent_changes")
             viewModel.populateEditingSuggestionsProvider(item)
-            startActivity(SuggestionsActivity.newIntent(requireActivity(),
-                DescriptionEditActivity.Action.VANDALISM_PATROL, Constants.InvokeSource.SUGGESTED_EDITS))
+            startActivity(SuggestionsActivity.newIntent(requireActivity(), DescriptionEditActivity.Action.VANDALISM_PATROL))
         }
 
         override fun onUserClick(item: MwQueryResult.RecentChange, view: View) {
@@ -420,13 +419,10 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
         var searchAndFilterActionProvider: SearchAndFilterActionProvider? = null
 
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-            searchAndFilterActionProvider = SearchAndFilterActionProvider(requireContext(), searchHintString,
+            searchAndFilterActionProvider = SearchAndFilterActionProvider(requireContext(), getSearchHintString(),
                 object : SearchAndFilterActionProvider.Callback {
                     override fun onQueryTextChange(s: String) {
                         onQueryChange(s)
-                    }
-
-                    override fun onQueryTextFocusChange() {
                     }
 
                     override fun onFilterIconClick() {
@@ -442,7 +438,7 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
                     }
                 })
 
-            val menuItem = menu.add(searchHintString)
+            val menuItem = menu.add(getSearchHintString())
 
             MenuItemCompat.setActionProvider(menuItem, searchAndFilterActionProvider)
 
@@ -456,14 +452,14 @@ class SuggestedEditsRecentEditsFragment : Fragment(), MenuProvider {
         override fun onQueryChange(s: String) {
             viewModel.currentQuery = s
             setupAdapters()
-            recentEditsListAdapter.reload()
+            recentEditsListAdapter.refresh()
         }
 
         override fun onDestroyActionMode(mode: ActionMode) {
             super.onDestroyActionMode(mode)
             actionMode = null
             viewModel.currentQuery = ""
-            recentEditsListAdapter.reload()
+            recentEditsListAdapter.refresh()
             viewModel.actionModeActive = false
             setupAdapters()
         }
